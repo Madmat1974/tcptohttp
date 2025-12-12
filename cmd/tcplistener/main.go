@@ -6,7 +6,7 @@ import (
 	"strings"
 	"errors"
 	"net"
-	"/home/martin/.local/opt/go-v1.25.1/src/httpfromtcp/internal/request"
+	"github.com/Madmat1974/tcptohttp/internal/request"
 )
 
 
