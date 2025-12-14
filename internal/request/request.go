@@ -7,18 +7,24 @@ import (
 	"unicode"
 	"bytes"
 	"errors"
+	"HTTPFTCP/internal/headers"
+	"strconv"
 )
 
 type requestState int
 
 const (
 	requestStateInitialized requestState = iota
+	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
 type Request struct {
 	RequestLine RequestLine
+	Headers		headers.Headers
 	state requestState
+	Body 		[]byte
 }
 
 type RequestLine struct {
@@ -28,6 +34,21 @@ type RequestLine struct {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.state != requestStateDone {
+		n, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return 0, err
+		}
+		totalBytesParsed += n
+		if n == 0 {
+			break
+		}
+	}
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.state {
 	case requestStateInitialized:
 		rl, n, err := parseRequestLine(data)
@@ -38,8 +59,37 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil //need more data
 		}
 		r.RequestLine = *rl
-		r.state = requestStateDone
+		r.state = requestStateParsingHeaders
 		return n, nil
+
+	case requestStateParsingHeaders:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.state = requestStateParsingBody
+		}
+		return n, nil	
+	
+	case requestStateParsingBody:
+		contentLenStr, ok := r.Headers.Get("Content-Length")
+		if !ok {
+			r.state = requestStateDone //no Content-Length header found
+			return len(data), nil
+		}
+		contentLen, err := strconv.Atoi(contentLenStr)
+		if err != nil {
+			return 0, fmt.Errorf("malformed Content-Length: %v", err)
+		}
+		r.Body = append(r.Body, data...)
+		if len(r.Body) > contentLen {
+			return 0, fmt.Errorf("body longer than Content-Length")
+		}
+		if len(r.Body) == contentLen {
+			r.state = requestStateDone
+		}
+		return len(data), nil
 
 	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
@@ -56,6 +106,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	readToIndex := 0
 	req := &Request{
 		state: requestStateInitialized,
+		Headers: headers.NewHeaders(),
 	}
 	
 	//main loop and filling the buffer

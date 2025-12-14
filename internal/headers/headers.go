@@ -44,10 +44,49 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("space before colon in header name")
 	}
 
-	key := strings.TrimSpace(string(keyBytes))
+	k1 := strings.TrimSpace(string(keyBytes))
+	key := strings.ToLower(k1) //ensure key is all lowercase
 	value := strings.TrimSpace(string(valueBytes))
-	h[key] = value
+
+	for i := 0; i < len(key); i++ {
+		if !isValidHeaderChar(key[i]) {
+			return 0, false, fmt.Errorf("invalid character in key")
+		}
+	}
+
+	//check if key already exists in the map
+	v, ok := h[key]
+	if ok {
+		h[key] = v + ", " + value
+	} else{
+		h[key] = value
+	}
 
 	n = index + 2
 	return n, false, nil
+}
+
+func (h Headers) Get(key string) (string, bool) {
+	k1 := strings.TrimSpace(key)
+	k2 := strings.ToLower(k1)
+
+	val, ok := h[k2]
+	return val, ok
+}
+
+func isValidHeaderChar(ch byte) bool {
+	//check for letters
+	if ch >= 'a' && ch <= 'z' {
+		return true
+	}
+	//check for digits
+	if ch >= '0' && ch <= '9' {
+		return true
+	}
+	//check for special characters
+	switch ch {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~' :
+			return true
+	}
+	return false
 }

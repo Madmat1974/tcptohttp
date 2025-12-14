@@ -27,6 +27,12 @@ func main() {
 			fmt.Printf("Error with request: %v\n", err)
 		}
 		fmt.Printf("Request line:\n- Method: %s\n- Target: %s\n- Version: %s\n", req.RequestLine.Method, req.RequestLine.RequestTarget, req.RequestLine.HttpVersion)
+		fmt.Println("Headers:")
+		for key, value := range req.Headers {
+			fmt.Printf("- %s: %s\n", key, value)
+		}
+		fmt.Println("Body:")
+		fmt.Println(string(req.Body))
 		fmt.Printf("Connection %v has been closed", conn)
 	}	
 }
