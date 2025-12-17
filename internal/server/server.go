@@ -6,14 +6,39 @@ import (
 	"sync/atomic"
 	"log"
 	"HTTPFTCP/internal/response"
+	"io"
+	"HTTPFTCP/internal/request"
+	"bytes"
 )
 
+type Handler func(w io.Writer, req *request.Request) *HandlerError
+
+type HandlerError struct {
+	StatusCode 	response.StatusCode
+	Message		string
+}
+
+
+
 type Server struct {
+	handler		Handler
 	listener	net.Listener
 	closed		atomic.Bool
 }
 
-func Serve(port int) (*Server, error) {
+
+func WriteHandlerError(w io.Writer, he *HandlerError) {
+    messageBytes := []byte(he.Message)
+
+    response.WriteStatusLine(w, he.StatusCode)
+
+    headers := response.GetDefaultHeaders(len(messageBytes))
+    response.WriteHeaders(w, headers)
+
+    w.Write(messageBytes)
+}
+
+func Serve(port int, handler Handler) (*Server, error) {
 	addr := fmt.Sprintf(":%d", port) //convert str to int
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -21,6 +46,7 @@ func Serve(port int) (*Server, error) {
 	}
 	fmt.Printf("TCP server listening on %s\n", addr)
 	s := &Server{
+		handler: handler,
 		listener: ln,
 	}
 	go s.listen()
@@ -52,15 +78,25 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	if err := response.WriteStatusLine(conn, response.Success); err != nil {
-		log.Println("error writing status line:", err)
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		he := &HandlerError{
+			StatusCode: response.BadRequest,
+			Message:	err.Error(),
+		}
+		WriteHandlerError(conn, he)
 		return
 	}
-
-	headers := response.GetDefaultHeaders(0)
-
-	if err := response.WriteHeaders(conn, headers); err != nil {
-		log.Println("error writing headers:", err)
-		return
+	buf := &bytes.Buffer{}
+	hErr := s.handler(buf, req)
+		if hErr != nil {
+    	WriteHandlerError(conn, hErr)
+    	return
 	}
+
+	body := buf.Bytes()
+	response.WriteStatusLine(conn, response.Success)
+	headers := response.GetDefaultHeaders(len(body))
+	response.WriteHeaders(conn, headers)
+	conn.Write(body)
 }
