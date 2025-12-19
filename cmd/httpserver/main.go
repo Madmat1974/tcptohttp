@@ -4,7 +4,7 @@ import (
 	"HTTPFTCP/internal/server"
 	"HTTPFTCP/internal/request"
 	"HTTPFTCP/internal/response"
-	//"HTTPFTCP/internal/headers"
+	"HTTPFTCP/internal/headers"
 	"log"
 	"os"
 	"os/signal"
@@ -12,6 +12,9 @@ import (
 	"strings"
 	"net/http"
 	"io"
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
 )
 
 const port = 42069
@@ -43,13 +46,16 @@ func proxyHandler(w *response.Writer, req *request.Request) {
 	h := response.GetDefaultHeaders(0)
 	delete(h, "Content-Length")
 	h.Override("Transfer-Encoding", "chunked")
+	//State the trailers that will show up later
+	h.Override("Trailer", "X-Content-SHA256, X-Content-Length")
 	w.WriteHeaders(h)
 
 	buf := make([]byte, 1024)
-
+	var fB []byte //keep track of bytes for SHA256 hash and length
 	for {
     	n, err := resp.Body.Read(buf)
     	if n > 0 {
+			fB = append(fB, buf[:n]...)
         	if _, werr := w.WriteChunkedBody(buf[:n]); werr != nil {
             	log.Println("error writing chunk:", werr)
 				break
@@ -65,8 +71,20 @@ func proxyHandler(w *response.Writer, req *request.Request) {
 
 	if _, err := w.WriteChunkedBodyDone(); err != nil {
 		log.Println("error finishing chunked body:", err)
+		return
 	}
 
+	//compute sha256 hash and length then write trailers
+	hash := sha256.Sum256(fB)
+	hexString := hex.EncodeToString(hash[:])
+	conLen := strconv.Itoa(len(fB))
+	trailers := headers.Headers{}
+	trailers["X-Content-SHA256"] = hexString
+	trailers["X-Content-Length"] = conLen
+
+	if err := w.WriteTrailers(trailers); err != nil {
+		log.Println("error finishing trailer/s", err)
+	}
 }
 
 func handler(w *response.Writer, req *request.Request) {

@@ -73,11 +73,30 @@ func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
 }
 
 func (w *Writer) WriteChunkedBodyDone() (int, error) {
-    if _, err := w.writer.Write([]byte("0\r\n")); err != nil {
-        return 0, err
+    if w.writerState != writerStateBody {
+        return 0, fmt.Errorf("cannot write body in state %d", w.writerState)
     }
-    if _, err := w.writer.Write([]byte("\r\n")); err != nil {
-        return 0, err
+    n, err := w.writer.Write([]byte("0\r\n"))
+    if err != nil {
+        return n, err
     }
-    return 0, nil
+    // keep state as writerStateBody
+    return n, nil
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+    if w.writerState != writerStateBody {
+        return fmt.Errorf("cannot write trailers in state %d", w.writerState)
+    }
+
+    for k, v := range h {
+        _, err := w.writer.Write([]byte(fmt.Sprintf("%s: %s\r\n", k, v)))
+        if err != nil {
+            return err
+        }
+    }
+
+    // final blank line after trailers
+    _, err := w.writer.Write([]byte("\r\n"))
+    return err
 }
