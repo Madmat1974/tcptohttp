@@ -3,8 +3,11 @@ package headers
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 )
+
+const crlf = "\r\n"
 
 type Headers map[string]string
 
@@ -13,80 +16,78 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
-	//find first occurance of "\r\n" and get its starting index
-	index := bytes.Index(data, []byte("\r\n"))
-	if index == -1 {
+	// print the data with crlf encoding
+
+	idx := bytes.Index(data, []byte(crlf))
+	if idx == -1 {
 		return 0, false, nil
 	}
-		
-	line := data[:index]
-	if len(line) == 0 {
-		//bytes consumed are the /r/n bytes
+	if idx == 0 {
+		// the empty line
+		// headers are done, consume the CRLF
 		return 2, true, nil
 	}
 
-	//find : location and verify presence
-	colon := bytes.IndexByte(line, ':')
-	if colon == -1 {
-		//no colon found and header is invalid
-		return 0, false, fmt.Errorf("missing colon")
-	}
-	//split the line into key/values
-	keyBytes := line[:colon]
-	valueBytes := line[colon+1:]
+	parts := bytes.SplitN(data[:idx], []byte(":"), 2)
+	key := strings.ToLower(string(parts[0]))
 
-	if len(keyBytes) == 0 {
-		return 0, false, fmt.Errorf("empty header name")
+	if key != strings.TrimRight(key, " ") {
+		return 0, false, fmt.Errorf("invalid header name: %s", key)
 	}
 
-	//need to check for no spaces before colon in keyBytes
-	if keyBytes[len(keyBytes)-1] == ' ' || keyBytes[len(keyBytes)-1] == '\t' {
-		return 0, false, fmt.Errorf("space before colon in header name")
+	value := bytes.TrimSpace(parts[1])
+	key = strings.TrimSpace(key)
+	if !validTokens([]byte(key)) {
+		return 0, false, fmt.Errorf("invalid header token found: %s", key)
 	}
-
-	k1 := strings.TrimSpace(string(keyBytes))
-	key := strings.ToLower(k1) //ensure key is all lowercase
-	value := strings.TrimSpace(string(valueBytes))
-
-	for i := 0; i < len(key); i++ {
-		if !isValidHeaderChar(key[i]) {
-			return 0, false, fmt.Errorf("invalid character in key")
-		}
-	}
-
-	//check if key already exists in the map
-	v, ok := h[key]
-	if ok {
-		h[key] = v + ", " + value
-	} else{
-		h[key] = value
-	}
-
-	n = index + 2
-	return n, false, nil
+	h.Set(key, string(value))
+	return idx + 2, false, nil
 }
 
 func (h Headers) Get(key string) (string, bool) {
-	k1 := strings.TrimSpace(key)
-	k2 := strings.ToLower(k1)
-
-	val, ok := h[k2]
-	return val, ok
+	key = strings.ToLower(key)
+	v, ok := h[key]
+	return v, ok
 }
 
-func isValidHeaderChar(ch byte) bool {
-	//check for letters
-	if ch >= 'a' && ch <= 'z' {
-		return true
+func (h Headers) Set(key, value string) {
+	key = strings.ToLower(key)
+	v, ok := h[key]
+	if ok {
+		value = strings.Join([]string{
+			v,
+			value,
+		}, ", ")
 	}
-	//check for digits
-	if ch >= '0' && ch <= '9' {
-		return true
-	}
-	//check for special characters
-	switch ch {
-		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~' :
-			return true
-	}
-	return false
+	h[key] = value
 }
+
+func (h Headers) Override(key, value string) {
+	key = strings.ToLower(key)
+	h[key] = value
+}
+
+var tokenChars = []byte{'!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~'}
+
+// validTokens checks if the data contains only valid tokens
+// or characters that are allowed in a token
+func validTokens(data []byte) bool {
+	for _, c := range data {
+		if !isTokenChar(c) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTokenChar(c byte) bool {
+	if c >= 'A' && c <= 'Z' ||
+		c >= 'a' && c <= 'z' ||
+		c >= '0' && c <= '9' {
+		return true
+	}
+
+	return slices.Contains(tokenChars, c)
+}
+
+

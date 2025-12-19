@@ -1,43 +1,46 @@
 package main
 
 import (
-	"fmt"
 	"bufio"
-	"os"
-	"log"
+	"fmt"
 	"net"
+	"os"
 )
 
 func main() {
-	udpAddress, err := net.ResolveUDPAddr("udp", "localhost:42069")
+	serverAddr := "localhost:42069"
+
+	udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 	if err != nil {
-		fmt.Printf("Failed to resolve UDP address: %v\n", err)
-		return
+		fmt.Fprintf(os.Stderr, "Error resolving UDP address: %v\n", err)
+		os.Exit(1)
 	}
 
-	//Dial a connection to remoteaddress
-	conn, err := net.DialUDP("udp", nil, udpAddress)
+	conn, err := net.DialUDP("udp", nil, udpAddr)
 	if err != nil {
-		fmt.Printf("Failed to dial UDP connection: %v\n", err)
-		return
+		fmt.Fprintf(os.Stderr, "Error dialing UDP: %v\n", err)
+		os.Exit(1)
 	}
-	//close connection when exiting
 	defer conn.Close()
+
+	fmt.Printf("Sending to %s. Type your message and press Enter to send. Press Ctrl+C to exit.\n", serverAddr)
 
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-			fmt.Print("> ")
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				log.Printf("Error reading input: %v", err)
-				break
-			}
+		fmt.Print("> ")
+		message, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
 
-			_, err = conn.Write([]byte(line))
-			if err != nil {
-				log.Printf("Failed to write UDP connection: %v", err)
-				break
-			}
+		_, err = conn.Write([]byte(message))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Message sent: %s", message)
 	}
 }

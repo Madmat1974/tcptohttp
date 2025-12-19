@@ -6,48 +6,27 @@ import (
 	"sync/atomic"
 	"log"
 	"HTTPFTCP/internal/response"
-	"io"
 	"HTTPFTCP/internal/request"
-	"bytes"
 )
 
-type Handler func(w io.Writer, req *request.Request) *HandlerError
-
-type HandlerError struct {
-	StatusCode 	response.StatusCode
-	Message		string
-}
+type Handler func(w *response.Writer, req *request.Request)
 
 
-
+// Server is an HTTP 1.1 server
 type Server struct {
-	handler		Handler
-	listener	net.Listener
-	closed		atomic.Bool
-}
-
-
-func WriteHandlerError(w io.Writer, he *HandlerError) {
-    messageBytes := []byte(he.Message)
-
-    response.WriteStatusLine(w, he.StatusCode)
-
-    headers := response.GetDefaultHeaders(len(messageBytes))
-    response.WriteHeaders(w, headers)
-
-    w.Write(messageBytes)
+	handler  Handler
+	listener net.Listener
+	closed   atomic.Bool
 }
 
 func Serve(port int, handler Handler) (*Server, error) {
-	addr := fmt.Sprintf(":%d", port) //convert str to int
-	ln, err := net.Listen("tcp", addr)
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("TCP server listening on %s\n", addr)
 	s := &Server{
-		handler: handler,
-		listener: ln,
+		handler:  handler,
+		listener: listener,
 	}
 	go s.listen()
 	return s, nil
@@ -68,35 +47,26 @@ func (s *Server) listen() {
 			if s.closed.Load() {
 				return
 			}
-		log.Println("error accepting connection:", err)
-		continue
+			log.Printf("Error accepting connection: %v", err)
+			continue
 		}
 		go s.handle(conn)
 	}
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer conn.Close()
+    defer conn.Close()
 
-	req, err := request.RequestFromReader(conn)
-	if err != nil {
-		he := &HandlerError{
-			StatusCode: response.BadRequest,
-			Message:	err.Error(),
-		}
-		WriteHandlerError(conn, he)
-		return
-	}
-	buf := &bytes.Buffer{}
-	hErr := s.handler(buf, req)
-		if hErr != nil {
-    	WriteHandlerError(conn, hErr)
-    	return
-	}
+    w := response.NewWriter(conn)
 
-	body := buf.Bytes()
-	response.WriteStatusLine(conn, response.Success)
-	headers := response.GetDefaultHeaders(len(body))
-	response.WriteHeaders(conn, headers)
-	conn.Write(body)
+    req, err := request.RequestFromReader(conn)
+    if err != nil {
+        w.WriteStatusLine(response.StatusCodeBadRequest)
+        body := []byte(fmt.Sprintf("Error parsing request: %v", err))
+        w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+        w.WriteBody(body)
+        return
+    }
+
+    s.handler(w, req)
 }
